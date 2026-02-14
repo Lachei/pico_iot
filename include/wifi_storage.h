@@ -21,21 +21,32 @@ struct wifi_storage {
 		[[maybe_unused]] static bool inited = [](){ storage.load_from_persistent_storage(); return true; }();
 		return storage;
 	}
+	uint32_t last_scanned{};
 	bool wifi_changed{true};
 	bool wifi_connected{false};
 	static_string<64> ssid_wifi{};
 	static_string<64> pwd_wifi{};
 	bool hostname_inited{false};
 	bool hostname_changed{true};
-	static_string<64> hostname{"DcDcConverter"};
+	static_string<64> hostname{"pico-iot"};
 	static_string<64> mdns_service_name{"lachei_tcp_server"};
 
 	void update_hostname() {
 		if (!hostname_changed)
 			return;
 
+		if (hostname_inited && PICO_OK != persistent_storage_t::Default().write(hostname, &persistent_storage_layout::hostname))
+			LogError("Failed to store hostname");
+
 		LogInfo("Hostname change detected, adopting hostname");
-		netif_set_hostname(&cyw43_state.netif[CYW43_ITF_STA], hostname.data());
+		cyw43_arch_lwip_begin();
+		struct netif* nif = &cyw43_state.netif[CYW43_ITF_STA];
+		if (hostname_inited)
+			dhcp_stop(nif);
+		netif_set_hostname(nif, hostname.data());
+		if (hostname_inited)
+			dhcp_start(nif);
+		cyw43_arch_lwip_end();
 		if (!hostname_inited) {
 			mdns_resp_init(); 
 			mdns_resp_add_netif(&cyw43_state.netif[CYW43_ITF_STA], hostname.data());
@@ -51,23 +62,30 @@ struct wifi_storage {
 	void update_wifi_connection() {
 		wifi_connected = CYW43_LINK_UP == cyw43_tcpip_link_status(&cyw43_state, CYW43_ITF_STA);
 		bool wifi_available = wifis | contains{ssid_wifi.sv(), [](const wifi_info &w) { return w.ssid.sv(); }};
-		if ((wifi_connected && !wifi_changed) || ssid_wifi.cur_size == 0 || pwd_wifi.cur_size < 8 || !wifi_available)
+		if (!wifi_changed || ssid_wifi.cur_size == 0 || pwd_wifi.cur_size < 8 || !wifi_available)
 			return;
 
+		LogInfo("Connecting to wifi");
 		if (wifi_changed) {
+			cyw43_arch_lwip_begin();
 			cyw43_arch_disable_sta_mode();
 			cyw43_arch_enable_sta_mode();
+			cyw43_arch_lwip_end();
 		}
-
-		LogInfo("Connecting to wifi");
-		if (PICO_OK != cyw43_arch_wifi_connect_timeout_ms(ssid_wifi.data(), pwd_wifi.data(), CYW43_AUTH_WPA2_AES_PSK, 5000)) {
-			LogWarning("failed to connect, retry next update_wifi_connection_call()");
+		if (PICO_OK != cyw43_arch_wifi_connect_async(ssid_wifi.data(), pwd_wifi.data(), CYW43_AUTH_WPA2_AES_PSK)) {
+			LogWarning("failed to call cyw43_arch_wifi_connect_async()");
+			return; // avoid resetting wifi_changed, retry next iteration
 		}
 
 		wifi_changed = false;
 	}
 	
 	void update_scanned() {
+		uint32_t cur = time_us_64() / 1000000;
+		if (cyw43_wifi_scan_active(&cyw43_state) && last_scanned - cur < 10) // after 10 seconds forces rediscover
+			return;
+		vTaskDelay(pdMS_TO_TICKS(500)); // avoid back to back scanning
+		last_scanned = cur;
 		cyw43_wifi_scan_options_t scan_options = {0};
 		if (0 != cyw43_wifi_scan(&cyw43_state, &scan_options, NULL, _scan_result)) {
 			LogError("Failed wifi scan");

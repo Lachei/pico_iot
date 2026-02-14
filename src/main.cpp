@@ -28,8 +28,11 @@
 constexpr UBaseType_t STANDARD_TASK_PRIORITY = tskIDLE_PRIORITY + 1ul;
 constexpr UBaseType_t CONTROL_TASK_PRIORITY = tskIDLE_PRIORITY + 10ul;
 
+constexpr uint32_t time_ms() { return time_us_64() / 1000; }
+constexpr uint32_t time_s() { return time_us_64() / 1000000; }
+
 void usb_comm_task(void *) {
-    LogInfo("Usb communication task");
+    LogInfo("Usb communication task started");
     crypto_storage::Default();
 
     for (;;) {
@@ -50,17 +53,29 @@ void wifi_search_task(void *) {
     if (wifi_storage::Default().ssid_wifi.empty()) // onyl start the access point by default if no normal wifi connection is set
         access_point::Default().init();
 
-    wifi_storage::Default().update_hostname();
+    constexpr uint32_t ap_timeout = 10;
+    uint32_t cur_time = time_s();
+    uint32_t last_conn = cur_time;
 
     for (;;) {
-        LogInfo("Wifi update loop");
-        wifi_storage::Default().update_wifi_connection();
-        cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, wifi_storage::Default().wifi_connected);
+        cur_time = time_s();
+        uint32_t dt = cur_time - last_conn;
         wifi_storage::Default().update_hostname();
+        wifi_storage::Default().update_wifi_connection();
+        if (wifi_storage::Default().wifi_connected)
+            last_conn = cur_time;
+        if (dt % 30 == 5) // every 30 seconds enable reconnect try
+            wifi_storage::Default().wifi_changed = true;
+        if (dt > ap_timeout) {
+            access_point::Default().init();
+            cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, cur_time & 1);
+        } else {
+            cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, wifi_storage::Default().wifi_connected);
+        }
         wifi_storage::Default().update_scanned();
         if (wifi_storage::Default().wifi_connected)
             ntp_client::Default().update_time();
-        vTaskDelay(wifi_storage::Default().wifi_connected ? 5000: 1000);
+        vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
 
@@ -78,21 +93,17 @@ void startup_task(void *) {
         }
     }
     cyw43_arch_enable_sta_mode();
+    wifi_storage::Default().update_hostname();
     Webserver().start();
     LogInfo("Ready, running http at {}", ip4addr_ntoa(netif_ip4_addr(netif_list)));
     LogInfo("Initialization done");
     std::cout << "Initialization done, get all further info via the commands shown in 'help'\n";
+
     cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 1);
-    TaskHandle_t task_usb_comm;
-    TaskHandle_t task_update_wifi;
-    auto err = xTaskCreate(usb_comm_task, "usb_comm", 512, NULL, 1, &task_usb_comm);	// usb task also has to be started only after cyw43 init as some wifi functions are available
-    if (err != pdPASS)
-        LogError("Failed to start usb communication task with code {}" ,err);
-    err = xTaskCreate(wifi_search_task, "UpdateWifiThread", 512, NULL, 1, &task_update_wifi);
-    if (err != pdPASS)
-        LogError("Failed to start usb communication task with code {}" ,err);
+    xTaskCreate(usb_comm_task, "usb_comm", 512, NULL, 1, NULL);
+    xTaskCreate(wifi_search_task, "UpdateWifiThread", 512, NULL, 1, NULL);
     cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 0);
-    for (;;) vTaskDelay(1<<20);
+    vTaskDelete(NULL); // remove this task for efficiency reasions
 }
 
 int main( void )
@@ -102,8 +113,7 @@ int main( void )
     LogInfo("Starting FreeRTOS on all cores.");
     std::cout << "Starting FreeRTOS on all cores\n";
 
-    TaskHandle_t task_startup;
-    xTaskCreate(startup_task, "StartupThread", 512, NULL, 1, &task_startup);
+    xTaskCreate(startup_task, "StartupThread", 512, NULL, 1, NULL);
 
     vTaskStartScheduler();
     return 0;

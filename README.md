@@ -47,9 +47,11 @@ in some folder on the machine.
 
 To build then simply run the following commands:
 ```bash
+git clone https://github.com/Lachei/pico_iot.git
+cd pico_iot
 mkdir build
 cd build
-cmake .. -DFREERTOS_KERNEL_PATH=<PATH_TO_DOWNLOADED_RTOS_KERNEL_FOLDER>
+cmake .. -DPICO_SDK_PATH=<PAHT_TO_PICO_SDK_FOLDER> -DFREERTOS_KERNEL_PATH=<PATH_TO_DOWNLOADED_RTOS_KERNEL_FOLDER> --fresh -DPICO_BOARD=pico2_w
 make -j12
 ```
 

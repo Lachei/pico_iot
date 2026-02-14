@@ -36,21 +36,21 @@ static constexpr inline void handle_usb_command(std::istream &in = std::cin, std
 		out << "      Variable1\n";
 		out << "      Variable2\n";
 		out << "      Variable3\n\n";
-		out << "  enable_wifi\n";
+		out << "  enable_wifi|ew\n";
 		out << "    Activate wifi on the device\n\n";
-		out << "  disable_wifi\n";
+		out << "  disable_wifi|dw\n";
 		out << "    Disable wifi on the device\n\n";
-		out << "  enable_ap\n";
+		out << "  enable_ap|ea\n";
 		out << "    Activate the acces point on the device (also activates wifi if disabled)\n\n";
-		out << "  disable_ap\n";
+		out << "  disable_ap|da\n";
 		out << "    Disable the acces point on the device (leafs the other wifi untouched)\n\n";
-		out << "  connect_wifi ${ssid} ${password}\n";
+		out << "  connect_wifi ${ssid} ${password}|cw\n";
 		out << "    Store the wifi credentials for a certain ssid and connect if its available\n\n";
-		out << "  set_log_level (info|warning|error|fatal)\n";
+		out << "  set_log_level (info|warning|error|fatal)|sll\n";
 		out << "    Set the log level to the specified value\n\n";;
-		out << "  log\n";
+		out << "  log|l\n";
 		out << "    Print the log storage to the console\n\n";
-		out << "  logs\n";
+		out << "  logs|ls\n";
 		out << "    Print the log storage with a separator line to the console\n\n";
 		out << "  s\n";
 		out << "    Print a separator line with dashes\n\n";
@@ -70,22 +70,28 @@ static constexpr inline void handle_usb_command(std::istream &in = std::cin, std
 		if (!in)
 			out << "Error at setting the value\n";
 		in.clear();
-	} else if (command == "enable_wifi") {
+	} else if (command == "enable_wifi" || command == "ew") {
 		cyw43_arch_enable_sta_mode();
-	} else if (command == "disable_wifi") {
+	} else if (command == "disable_wifi" || command == "dw") {
 		cyw43_arch_disable_sta_mode();
-	} else if (command == "enable_ap") {
+	} else if (command == "enable_ap" || command == "ea") {
 		access_point::Default().init();
-	} else if (command == "disable_ap") {
+	} else if (command == "disable_ap" || command == "da") {
 		access_point::Default().deinit();
-	} else if (command == "connect_wifi") {
+	} else if (command == "connect_wifi" || command == "cw") {
 		std::string ssid, pwd;
 		in >> ssid >> pwd;
 		wifi_storage::Default().ssid_wifi.fill(ssid);
 		wifi_storage::Default().pwd_wifi.fill(pwd);
 		wifi_storage::Default().wifi_connected = false;
 		wifi_storage::Default().wifi_changed = true;
-	} else if (command == "set_log_level") {
+		if (PICO_OK != persistent_storage_t::Default().write(
+			wifi_storage::Default().ssid_wifi, &persistent_storage_layout::ssid_wifi))
+			LogError("Failed to store ssid_wifi");
+		if (PICO_OK != persistent_storage_t::Default().write(
+			wifi_storage::Default().pwd_wifi, &persistent_storage_layout::pwd_wifi))
+			LogError("Failed to store pwd_wifi");
+	} else if (command == "set_log_level" || command == "sll") {
 		std::string level;
 		in >> level;
 		if      (level == "info") log_storage::Default().cur_severity = log_severity::Info;
@@ -93,9 +99,9 @@ static constexpr inline void handle_usb_command(std::istream &in = std::cin, std
 		else if (level == "error") log_storage::Default().cur_severity = log_severity::Error;
 		else if (level == "fatal") log_storage::Default().cur_severity = log_severity::Fatal;
 		else out << "[ERROR] severity " << level << " not allowed. Allowed values are: info|warning|error|fatal\n";
-	} else if (command == "log") {
+	} else if (command == "log" || command == "l") {
 		print_logs();
-	} else if (command == "logs") {
+	} else if (command == "logs" || command == "ls") {
 		out << "--------------------------------------\n";
 		print_logs();
 	} else if (command == "s") {

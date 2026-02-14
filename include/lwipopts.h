@@ -5,6 +5,8 @@
 
 #define NO_SYS                      0
 #define LWIP_SOCKET                 1
+#define LWIP_NETIF_HOSTNAME         1
+#define LWIP_DHCP_HOSTNAME          1
 
 #if PICO_CYW43_ARCH_POLL
 #define MEM_LIBC_MALLOC             1
